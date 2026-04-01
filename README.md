@@ -18,33 +18,6 @@ brew install cc65
 
 For other platforms or installation methods, refer to the [cc65 project](https://github.com/cc65/cc65).
 
-#### bin2woz
-
-Install from NPM (recommended):
-```bash
-npm install -g bin2woz
-```
-
-Or build from source:
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/acwright/bin2woz.git
-   cd bin2woz
-   ```
-
-2. Install dependencies and build:
-   ```bash
-   npm install
-   npm run build
-   ```
-
-3. Link globally (optional):
-   ```bash
-   npm link
-   ```
-
-For more information, see the [bin2woz project](https://github.com/acwright/bin2woz).
-
 ### Available Targets
 
 - `make` or `make all` - Build the program
