@@ -1,7 +1,7 @@
 6502-CRT
 ========
 
-A 6502 assembly language cartridge template for [A.C. Wright 6502 project](https://github.com/acwright/6502). This repository provides a starting point for developing cartridges with CC65 compiler support.
+A 6502 assembly language cartridge template for [A.C. Wright 6502 project](https://github.com/acwright/6502).
 
 ## Building
 
