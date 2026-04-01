@@ -28,7 +28,6 @@ For other platforms or installation methods, refer to the [cc65 project](https:/
 ### Example
 
 ```bash
-cd <directory-name>
 make        # Build the program
 make view   # View the hexdump
 make eeprom # Write the binary file to an eeprom using minipro
