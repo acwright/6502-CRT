@@ -1,7 +1,7 @@
 6502-CRT
 ========
 
-Assembly code template for a cartridge for the [A.C. Wright 6502 project](https://github.com/acwright/6502).
+Assembly code cartridge template for the [A.C. Wright 6502 project](https://github.com/acwright/6502).
 
 ## Building
 
