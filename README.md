@@ -31,14 +31,14 @@ After calling `KernalInit`, the full Kernal jump table is available. Key entry p
 
 | Address | Routine | Description |
 |---------|---------|-------------|
-| `$A072` | `KernalInit` | Initialize all hardware; caller must reset stack pointer first. Returns via RTS (no CLI, no splash) |
-| `$A075` | `KernalVersion` | Get BIOS version (A=major, X=minor) |
+| `$A078` | `KernalInit` | Initialize all hardware; caller must reset stack pointer first. Returns via RTS (no CLI, no splash) |
+| `$A07B` | `KernalVersion` | Get BIOS version (A=major, X=minor) |
 | `$A000` | `Chrout` | Output character (routed by IO_MODE) |
 | `$A003` | `Chrin` | Read character from input buffer |
-| `$A01B` | `Beep` | Play startup beep (skips if no SID) |
-| `$A01E` | `VideoClear` | Clear screen and reset cursor |
-| `$A024` | `VideoSetCursor` | Set cursor position (X=col, Y=row) |
-| `$A051` | `SetIOMode` | Set console output mode (A=0 video, A=1 serial) |
+| `$A030` | `Beep` | Play startup beep (skips if no SID) |
+| `$A018` | `VideoClear` | Clear screen and reset cursor |
+| `$A01E` | `VideoSetCursor` | Set cursor position (X=col, Y=row) |
+| `$A00F` | `SetIOMode` | Set console output mode (A=0 video, A=1 serial) |
 
 See `6502.inc` for the complete jump table and hardware register definitions.
 
