@@ -46,9 +46,22 @@ Current file: Cart.asm
 000000r 2               ;   BOOT SEQUENCE
 000000r 2               ;   -------------
 000000r 2               ;   On RESET the BIOS probes all eight IO slots, initializes detected
-000000r 2               ;   hardware, auto-selects video or serial console, plays a startup beep,
-000000r 2               ;   and displays a boot menu.  ENTER launches BASIC; ESC enters the
-000000r 2               ;   Monitor.  A 5-second timeout auto-boots BASIC if no key is pressed.
+000000r 2               ;   hardware, and auto-selects video or serial console.  If neither is
+000000r 2               ;   found, IO_MODE is left unchanged (no halt — cartridges with their
+000000r 2               ;   own display hardware can still boot).  A startup beep plays (if SID
+000000r 2               ;   is present) for audible feedback, then BOOT_VECTOR ($035B) is
+000000r 2               ;   checked — if non-zero, execution jumps there (cartridge takeover).
+000000r 2               ;   Otherwise a console check halts if no video/serial is found, then
+000000r 2               ;   the splash screen and boot menu are displayed.  ENTER launches
+000000r 2               ;   BASIC; ESC enters the Monitor.  A 5-second timeout auto-boots BASIC.
+000000r 2               ;
+000000r 2               ;   CARTRIDGE SUPPORT
+000000r 2               ;   -----------------
+000000r 2               ;   Cartridges overlay $C000-$FFFF (Monitor, BASIC, Wozmon, vectors).
+000000r 2               ;   The Kernal ($A000-$B7FF) and character set ($B800-$BFFF) remain
+000000r 2               ;   accessible.  Use KernalInit ($A072) to initialize all hardware and
+000000r 2               ;   return via RTS — interrupts are left disabled so the cart can set
+000000r 2               ;   up its own handlers first.  See usage patterns in the BIOS README.
 000000r 2               ;
 000000r 2               ;   IO_MODE
 000000r 2               ;   -------
@@ -126,6 +139,11 @@ Current file: Cart.asm
 000000r 2               
 000000r 2               ; RTC scratch (used by RtcWriteDate to pass century):
 000000r 2               RTC_BUF_CENT        := $030B             ; Century value for RtcReadDate / RtcWriteDate
+000000r 2               
+000000r 2               ; Cartridge / boot redirect vector:
+000000r 2               BOOT_VECTOR         := $035B             ; 2 bytes — Boot redirect address (0=normal boot)
+000000r 2                                                        ;   Set after KernalInit to redirect Reset flow
+000000r 2                                                        ;   KernalInit zeroes this; write after init returns
 000000r 2               
 000000r 2               
 000000r 2               ; =============================================================================
@@ -316,6 +334,20 @@ Current file: Cart.asm
 000000r 2                                                        ;   In: A = low byte, X = high byte (16-bit count)
 000000r 2                                                        ;   Uses VIA T1 if available, else software loop
 000000r 2                                                        ;   Modifies: A
+000000r 2               
+000000r 2               ; --- System / Cartridge Support ---
+000000r 2               KernalInit          := $A072             ; Initialize all hardware (vectors, probe & init all I/O)
+000000r 2                                                        ;   Caller MUST reset the stack pointer before JSR:
+000000r 2                                                        ;     ldx #$ff / txs / jsr KernalInit
+000000r 2                                                        ;   Zeroes BOOT_VECTOR, sets HW_PRESENT, IO_MODE, IRQ/BRK/NMI ptrs
+000000r 2                                                        ;   Does NOT reset the stack pointer
+000000r 2                                                        ;   Does NOT enable interrupts (caller must CLI)
+000000r 2                                                        ;   Does NOT play beep, display splash, or enter boot menu
+000000r 2                                                        ;   Does NOT halt if no console is detected
+000000r 2                                                        ;   Modifies: All registers, flags
+000000r 2               
+000000r 2               KernalVersion       := $A075             ; Get BIOS version
+000000r 2                                                        ;   Out: A = major version, X = minor version
 000000r 2               
 000000r 2               
 000000r 2               ; =============================================================================
@@ -645,6 +677,10 @@ Current file: Cart.asm
 000000r 2               ;   SECTION 6: USEFUL CONSTANTS
 000000r 2               ; =============================================================================
 000000r 2               
+000000r 2               ; --- BIOS Version ---
+000000r 2               BIOS_VERSION_MAJOR  = 1
+000000r 2               BIOS_VERSION_MINOR  = 0
+000000r 2               
 000000r 2               ; --- ASCII Control Characters ---
 000000r 2               CHAR_BEL            = $07                ; Bell (Beep via SID)
 000000r 2               CHAR_BS             = $08                ; Backspace (cursor left + erase in video mode)
@@ -688,12 +724,97 @@ Current file: Cart.asm
 000000r 1               
 000000r 1               .segment "CART"
 000000r 1               
-000000r 1               Reset:
-000000r 1                 ; Your code goes here!
+000000r 1               ; =============================================================================
+000000r 1               ;   CartReset — Cartridge entry point
+000000r 1               ; =============================================================================
+000000r 1               ;   Called on power-on / hardware reset.  The cartridge ROM overlays
+000000r 1               ;   $C000-$FFFF, so the CPU vectors below point here.
+000000r 1               ;
+000000r 1               ;   KernalInit ($A072) initializes all hardware:
+000000r 1               ;     - CLD, SEI (clears decimal mode, disables interrupts)
+000000r 1               ;     - IRQ / BRK / NMI RAM vectors (default handlers)
+000000r 1               ;     - Probes & inits all detected I/O cards
+000000r 1               ;     - Sets HW_PRESENT, IO_MODE (auto-detect video/serial)
+000000r 1               ;     - Does NOT reset the stack pointer — caller must do this
+000000r 1               ;     - Does NOT enable interrupts — caller must CLI
+000000r 1               ;     - Does NOT halt if no console is found
+000000r 1               ; =============================================================================
 000000r 1               
-000000r 1               .segment "VECTORS"
+000000r 1               CartReset:
+000000r 1  A2 FF          ldx #$ff
+000002r 1  9A             txs                           ; Reset the stack pointer
+000003r 1  20 72 A0       jsr KernalInit                ; Initialize all hardware (interrupts left disabled)
+000006r 1               
+000006r 1                 ; --- Optional: play startup beep for audible feedback ---
+000006r 1  20 1B A0       jsr Beep                      ; Skips silently if no SID present
+000009r 1               
+000009r 1                 ; --- Optional: override interrupt vectors ---
+000009r 1                 ; lda #<MyIrqHandler
+000009r 1                 ; sta IRQ_PTR
+000009r 1                 ; lda #>MyIrqHandler
+000009r 1                 ; sta IRQ_PTR + 1
+000009r 1               
+000009r 1  58             cli                           ; Enable interrupts
+00000Ar 1               
+00000Ar 1                 ; === Your cartridge program starts here ===
+00000Ar 1               
+00000Ar 1                 ; Example: clear screen and print a message
+00000Ar 1  20 1E A0       jsr VideoClear                ; Clear video screen (safe even if no video card)
+00000Dr 1               
+00000Dr 1  A9 rr          lda #<HelloMsg
+00000Fr 1  85 02          sta STR_PTR
+000011r 1  A9 rr          lda #>HelloMsg
+000013r 1  85 03          sta STR_PTR + 1
+000015r 1  20 rr rr       jsr PrintStr                  ; Print the message
+000018r 1               
+000018r 1               @Loop:
+000018r 1  80 FE          bra @Loop                     ; Loop forever
+00001Ar 1               
+00001Ar 1               ; =============================================================================
+00001Ar 1               ;   PrintStr — Print a null-terminated string via Chrout
+00001Ar 1               ;   In: STR_PTR ($02-$03) = pointer to string
+00001Ar 1               ; =============================================================================
+00001Ar 1               PrintStr:
+00001Ar 1  A0 00          ldy #$00
+00001Cr 1               @PrintLoop:
+00001Cr 1  B1 02          lda (STR_PTR),y
+00001Er 1  F0 06          beq @PrintDone                ; Null terminator — done
+000020r 1  20 00 A0       jsr Chrout
+000023r 1  C8             iny
+000024r 1  D0 F6          bne @PrintLoop                ; Max 256 chars per call
+000026r 1               @PrintDone:
+000026r 1  60             rts
+000027r 1               
+000027r 1               ; =============================================================================
+000027r 1               ;   Data
+000027r 1               ; =============================================================================
+000027r 1               
+000027r 1               HelloMsg:
+000027r 1  48 65 6C 6C    .byte "Hello from Cartridge!", CHAR_CR, CHAR_LF, $00
+00002Br 1  6F 20 66 72  
+00002Fr 1  6F 6D 20 43  
+00003Fr 1               
+00003Fr 1               ; =============================================================================
+00003Fr 1               ;   IRQ handler — Cartridge must provide this since it owns the IRQ vector
+00003Fr 1               ; =============================================================================
+00003Fr 1               ;   The default Kernal IRQ handler (set up by KernalInit via IRQ_PTR) handles
+00003Fr 1               ;   keyboard and serial input.  If your cartridge doesn't need custom IRQ
+00003Fr 1               ;   processing, simply point the IRQ hardware vector to IrqTrampoline below,
+00003Fr 1               ;   which jumps through the RAM vector that KernalInit already configured.
+00003Fr 1               
+00003Fr 1               IrqTrampoline:
+00003Fr 1  6C 00 03       jmp (IRQ_PTR)                 ; Dispatch through the RAM-based IRQ vector
+000042r 1               
+000042r 1               NmiTrampoline:
+000042r 1  6C 04 03       jmp (NMI_PTR)                 ; Dispatch through the RAM-based NMI vector
+000045r 1               
+000045r 1               ; =============================================================================
+000045r 1               ;   CPU Vectors — Cart owns $FFFA-$FFFF
+000045r 1               ; =============================================================================
+000045r 1               
+000045r 1               .segment "VECTORS"
 000000r 1               
-000000r 1  rr rr        .word   Reset         ; NMI vector
-000002r 1  rr rr        .word   Reset         ; RESET vector
-000004r 1  rr rr        .word   Reset         ; IRQ vector
+000000r 1  rr rr        .word   NmiTrampoline            ; NMI vector  — dispatch through NMI_PTR
+000002r 1  rr rr        .word   CartReset                ; RESET vector — cartridge entry point
+000004r 1  rr rr        .word   IrqTrampoline            ; IRQ vector  — dispatch through IRQ_PTR
 000004r 1               
