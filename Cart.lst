@@ -167,8 +167,9 @@ Current file: Cart.asm
 000000r 2                                                        ;   Preserves: A, X, Y
 000000r 2                                                        ;   Handles CR ($0D), LF ($0A), BS ($08), BEL ($07) in video mode
 000000r 2               
-000000r 2               Chrin               := $A003             ; Input character from buffer (blocking-poll)
+000000r 2               Chrin               := $A003             ; Input character from buffer (non-blocking poll)
 000000r 2                                                        ;   Out: A = character, C=1 if char available, C=0 if not
+000000r 2                                                        ;   Caller must loop until C=1 for blocking behavior
 000000r 2                                                        ;   Echoes character via Chrout
 000000r 2                                                        ;   Modifies: A
 000000r 2               
