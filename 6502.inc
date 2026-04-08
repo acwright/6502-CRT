@@ -31,8 +31,8 @@
 ;   $A000-$A0FF   Kernal Jump Table (stable entry points)
 ;   $A100-$B7FF   Kernal Implementation
 ;   $B800-$BFFF   Character Set ROM (2 KB, 256 × 8-byte patterns)
-;   $C000-$DFFF   Machine Code Monitor (8 KB)
-;   $E000-$FEFF   BASIC Interpreter
+;   $C000-$E7FF   BASIC Interpreter
+;   $E800-$FEFF   Machine Code Monitor
 ;   $FF00-$FFF9   Wozmon (mini monitor)
 ;   $FFFA-$FFFF   CPU Vectors (NMI, RESET, IRQ)
 ;
@@ -50,7 +50,7 @@
 ;
 ;   CARTRIDGE SUPPORT
 ;   -----------------
-;   Cartridges overlay $C000-$FFFF (Monitor, BASIC, Wozmon, vectors).
+;   Cartridges overlay $C000-$FFFF (BASIC, Monitor, Wozmon, vectors).
 ;   The Kernal ($A000-$B7FF) and character set ($B800-$BFFF) remain
 ;   accessible.  Use KernalInit ($A072) to initialize all hardware and
 ;   return via RTS — interrupts are left disabled so the cart can set
