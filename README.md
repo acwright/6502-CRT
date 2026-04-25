@@ -95,7 +95,7 @@ make
 ```
 
 Produces:
-- `Cart.crt` — 16 KB ROM image (`$C000–$FFFF`), ready to burn to EEPROM
+- `Cart.crt` — 32 KB ROM image (`$8000–$FFFF`), ready to burn to a 28C256 or 27C256 PROM
 - `Cart.lst` — Assembly listing file for debugging
 
 ### Programming the EEPROM
