@@ -1,7 +1,7 @@
 6502-CRT
 ========
 
-A 6502 assembly language cartridge template for the [A.C. Wright 6502 project](https://github.com/acwright/6502-ACE).
+A 6502 assembly language cartridge template for the [A.C. Wright 6502](https://github.com/acwright/6502-ACE) family of computer systems.
 
 ## Overview
 
