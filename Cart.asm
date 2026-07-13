@@ -41,29 +41,12 @@ CartReset:
   ; Example: clear screen and print a message
   jsr VideoClear                ; Clear video screen (safe even if no video card)
 
-  lda #<HelloMsg
-  sta STR_PTR
-  lda #>HelloMsg
-  sta STR_PTR + 1
-  jsr PrintStr                  ; Print the message
+  lda #<HelloMsg                ; A = string addr low
+  ldy #>HelloMsg                ; Y = string addr high
+  jsr PrintStr                  ; Print the message (Kernal $A090)
 
 @Loop:
   bra @Loop                     ; Loop forever
-
-; =============================================================================
-;   PrintStr — Print a null-terminated string via Chrout
-;   In: STR_PTR ($02-$03) = pointer to string
-; =============================================================================
-PrintStr:
-  ldy #$00
-@PrintLoop:
-  lda (STR_PTR),y
-  beq @PrintDone                ; Null terminator — done
-  jsr Chrout
-  iny
-  bne @PrintLoop                ; Max 256 chars per call
-@PrintDone:
-  rts
 
 ; =============================================================================
 ;   Data

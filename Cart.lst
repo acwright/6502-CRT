@@ -10,7 +10,7 @@ Current file: Cart.asm
 000000r 2               ; =============================================================================
 000000r 2               ;
 000000r 2               ;   CPU:       WDC 65C02
-000000r 2               ;   BIOS:      v1.1
+000000r 2               ;   BIOS:      v1.2
 000000r 2               ;   Assembler: ca65 (cc65 toolchain) — uses := for absolute symbols
 000000r 2               ;
 000000r 2               ;   Include this file in external projects to access Kernal routines,
@@ -408,6 +408,16 @@ Current file: Cart.asm
 000000r 2                                                        ;   Uses current CF_DISK
 000000r 2                                                        ;   Modifies: Flags, A, X, Y
 000000r 2               
+000000r 2               ; --- General Output Utilities (console routed by IO_MODE via Chrout) ---
+000000r 2               PrintStr            := $A090             ; Print a NUL-terminated string
+000000r 2                                                        ;   In : A = string addr low, Y = string addr high
+000000r 2                                                        ;   Modifies: Flags, A, Y, STR_PTR (X preserved)
+000000r 2               PrintCRLF           := $A093             ; Print CR ($0D) then LF ($0A)
+000000r 2                                                        ;   Modifies: Flags, A
+000000r 2               PrintDecU16         := $A096             ; Print an unsigned 16-bit value as decimal
+000000r 2                                                        ;   In : A = value low, X = value high (no leading zeros)
+000000r 2                                                        ;   Modifies: Flags, A, X, Y, FS_FILE_SIZE, FS_DIR_IDX
+000000r 2               
 000000r 2               
 000000r 2               ; =============================================================================
 000000r 2               ;   SECTION 5: IO HARDWARE REGISTERS
@@ -750,7 +760,7 @@ Current file: Cart.asm
 000000r 2               
 000000r 2               ; --- BIOS Version ---
 000000r 2               BIOS_VERSION_MAJOR  = 1
-000000r 2               BIOS_VERSION_MINOR  = 1
+000000r 2               BIOS_VERSION_MINOR  = 2
 000000r 2               
 000000r 2               ; --- ASCII Control Characters ---
 000000r 2               CHAR_BEL            = $07                ; Bell (Beep via SID)
@@ -832,58 +842,41 @@ Current file: Cart.asm
 00000Ar 1                 ; Example: clear screen and print a message
 00000Ar 1  20 18 A0       jsr VideoClear                ; Clear video screen (safe even if no video card)
 00000Dr 1               
-00000Dr 1  A9 rr          lda #<HelloMsg
-00000Fr 1  85 02          sta STR_PTR
-000011r 1  A9 rr          lda #>HelloMsg
-000013r 1  85 03          sta STR_PTR + 1
-000015r 1  20 rr rr       jsr PrintStr                  ; Print the message
-000018r 1               
-000018r 1               @Loop:
-000018r 1  80 FE          bra @Loop                     ; Loop forever
-00001Ar 1               
-00001Ar 1               ; =============================================================================
-00001Ar 1               ;   PrintStr — Print a null-terminated string via Chrout
-00001Ar 1               ;   In: STR_PTR ($02-$03) = pointer to string
-00001Ar 1               ; =============================================================================
-00001Ar 1               PrintStr:
-00001Ar 1  A0 00          ldy #$00
-00001Cr 1               @PrintLoop:
-00001Cr 1  B1 02          lda (STR_PTR),y
-00001Er 1  F0 06          beq @PrintDone                ; Null terminator — done
-000020r 1  20 00 A0       jsr Chrout
-000023r 1  C8             iny
-000024r 1  D0 F6          bne @PrintLoop                ; Max 256 chars per call
-000026r 1               @PrintDone:
-000026r 1  60             rts
-000027r 1               
-000027r 1               ; =============================================================================
-000027r 1               ;   Data
-000027r 1               ; =============================================================================
-000027r 1               
-000027r 1               HelloMsg:
-000027r 1  48 65 6C 6C    .byte "Hello from Cartridge!", CHAR_CR, CHAR_LF, $00
-00002Br 1  6F 20 66 72  
-00002Fr 1  6F 6D 20 43  
-00003Fr 1               
-00003Fr 1               ; =============================================================================
-00003Fr 1               ;   IRQ handler — Cartridge must provide this since it owns the IRQ vector
-00003Fr 1               ; =============================================================================
-00003Fr 1               ;   The default Kernal IRQ handler (set up by KernalInit via IRQ_PTR) handles
-00003Fr 1               ;   keyboard and serial input.  If your cartridge doesn't need custom IRQ
-00003Fr 1               ;   processing, simply point the IRQ hardware vector to IrqTrampoline below,
-00003Fr 1               ;   which jumps through the RAM vector that KernalInit already configured.
-00003Fr 1               
-00003Fr 1               IrqTrampoline:
-00003Fr 1  6C 00 03       jmp (IRQ_PTR)                 ; Dispatch through the RAM-based IRQ vector
-000042r 1               
-000042r 1               NmiTrampoline:
-000042r 1  6C 04 03       jmp (NMI_PTR)                 ; Dispatch through the RAM-based NMI vector
-000045r 1               
-000045r 1               ; =============================================================================
-000045r 1               ;   CPU Vectors — Cart owns $FFFA-$FFFF
-000045r 1               ; =============================================================================
-000045r 1               
-000045r 1               .segment "VECTORS"
+00000Dr 1  A9 rr          lda #<HelloMsg                ; A = string addr low
+00000Fr 1  A0 rr          ldy #>HelloMsg                ; Y = string addr high
+000011r 1  20 90 A0       jsr PrintStr                  ; Print the message (Kernal $A090)
+000014r 1               
+000014r 1               @Loop:
+000014r 1  80 FE          bra @Loop                     ; Loop forever
+000016r 1               
+000016r 1               ; =============================================================================
+000016r 1               ;   Data
+000016r 1               ; =============================================================================
+000016r 1               
+000016r 1               HelloMsg:
+000016r 1  48 65 6C 6C    .byte "Hello from Cartridge!", CHAR_CR, CHAR_LF, $00
+00001Ar 1  6F 20 66 72  
+00001Er 1  6F 6D 20 43  
+00002Er 1               
+00002Er 1               ; =============================================================================
+00002Er 1               ;   IRQ handler — Cartridge must provide this since it owns the IRQ vector
+00002Er 1               ; =============================================================================
+00002Er 1               ;   The default Kernal IRQ handler (set up by KernalInit via IRQ_PTR) handles
+00002Er 1               ;   keyboard and serial input.  If your cartridge doesn't need custom IRQ
+00002Er 1               ;   processing, simply point the IRQ hardware vector to IrqTrampoline below,
+00002Er 1               ;   which jumps through the RAM vector that KernalInit already configured.
+00002Er 1               
+00002Er 1               IrqTrampoline:
+00002Er 1  6C 00 03       jmp (IRQ_PTR)                 ; Dispatch through the RAM-based IRQ vector
+000031r 1               
+000031r 1               NmiTrampoline:
+000031r 1  6C 04 03       jmp (NMI_PTR)                 ; Dispatch through the RAM-based NMI vector
+000034r 1               
+000034r 1               ; =============================================================================
+000034r 1               ;   CPU Vectors — Cart owns $FFFA-$FFFF
+000034r 1               ; =============================================================================
+000034r 1               
+000034r 1               .segment "VECTORS"
 000000r 1               
 000000r 1  rr rr        .word   NmiTrampoline            ; NMI vector  — dispatch through NMI_PTR
 000002r 1  rr rr        .word   CartReset                ; RESET vector — cartridge entry point
