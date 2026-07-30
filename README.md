@@ -79,12 +79,17 @@ For other platforms, see the [cc65 project](https://github.com/cc65/cc65).
 brew install minipro
 ```
 
+#### Optional: 6502 CLI (for `make run`)
+
+Installed via the [6502-EMULATOR](https://github.com/acwright/6502-EMULATOR) app's Settings → Command Line → Install.
+
 ### Build Commands
 
 | Command | Description |
 |---------|-------------|
 | `make` | Build the cartridge ROM (`Cart.crt`) |
 | `make view` | Display hexdump of the built ROM |
+| `make run` | Launch the emulator app with the built cartridge loaded |
 | `make eeprom` | Write the ROM to an AT28C256 EEPROM via TL866 programmer |
 | `make clean` | Remove build artifacts |
 

@@ -11,6 +11,9 @@ build: $(TARGET).asm
 view:
 	hexdump -C $(TARGET).crt
 
+run:
+	6502 run --cart $(TARGET).crt
+
 eeprom:
 	minipro -p AT28C256	-w $(TARGET).crt
 
