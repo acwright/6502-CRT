@@ -11,7 +11,7 @@ Cartridges for this system overlay the ROM address space from `$C000–$FFFF`, r
 
 1. The cartridge ROM physically overrides the BIOS ROM in the `$C000–$FFFF` range
 2. The CPU fetches the RESET vector from `$FFFC–$FFFD` — now supplied by the cartridge
-3. The cartridge's reset handler calls `KernalInit` (`$A072`) to initialize all hardware
+3. The cartridge's reset handler calls `KernalInit` (`$A078`) to initialize all hardware
 4. After init, the cartridge takes full control — display its own UI, run its program, etc.
 
 ### Memory Layout
@@ -36,11 +36,15 @@ After calling `KernalInit`, the full Kernal jump table is available. Key entry p
 | `$A000` | `Chrout` | Output character (routed by IO_MODE) |
 | `$A003` | `Chrin` | Read character from input buffer |
 | `$A030` | `Beep` | Play startup beep (skips if no SID) |
-| `$A018` | `VideoClear` | Clear screen and reset cursor |
-| `$A01E` | `VideoSetCursor` | Set cursor position (X=col, Y=row) |
+| `$A018` | `VideoClear` | Clear screen and reset cursor (skips if no video card) |
+| `$A01E` | `VideoSetCursor` | Set cursor position (X=col, Y=row; skips if no video card) |
 | `$A00F` | `SetIOMode` | Set console output mode (A=0 video, A=1 serial) |
 
 See `6502.inc` for the complete jump table and hardware register definitions.
+
+Routines that drive an optional card check `HW_PRESENT` themselves, so calling
+one on a machine without that card is safe. Video and sound routines return
+silently; storage routines report failure in the carry.
 
 ### Interrupt Handling
 
@@ -127,3 +131,14 @@ Burns `Cart.crt` to an AT28C256 EEPROM using a TL866-compatible programmer and m
 3. Add additional `.asm` files and `.include` them from `Cart.asm` as needed
 4. The cartridge has ~16 KB of ROM space (`$C000–$FFF9`) for code and data
 
+## Related
+
+- [6502-ACE](https://github.com/acwright/6502-ACE) — the hardware, and the index of the whole family
+- [6502-BIOS](https://github.com/acwright/6502-BIOS) — the firmware behind the Kernal jump table; `6502.inc` here tracks its published API
+- [6502-EMULATOR](https://github.com/acwright/6502-EMULATOR) — run a cartridge without burning an EEPROM (`make run`)
+- [6502-PRG](https://github.com/acwright/6502-PRG) — the same idea for RAM programs loaded from BASIC
+- [6502-ASM](https://github.com/acwright/6502-ASM) — worked assembly examples
+
+## License
+
+MIT License — see [LICENSE](LICENSE).
