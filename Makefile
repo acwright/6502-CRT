@@ -1,7 +1,7 @@
 TARGET = Cart
 CONFIG = 6502
 
-.PHONY: all clean
+.PHONY: all build view run eeprom clean
 
 all: build
 
@@ -18,5 +18,4 @@ eeprom:
 	minipro -p AT28C256	-w $(TARGET).crt
 
 clean:
-	rm $(TARGET).crt
-	rm $(TARGET).lst
+	rm -f $(TARGET).crt $(TARGET).lst

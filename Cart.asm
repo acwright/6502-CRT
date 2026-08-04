@@ -10,7 +10,7 @@
 ;   Called on power-on / hardware reset.  The cartridge ROM overlays
 ;   $C000-$FFFF, so the CPU vectors below point here.
 ;
-;   KernalInit ($A072) initializes all hardware:
+;   KernalInit ($A078) initializes all hardware:
 ;     - CLD, SEI (clears decimal mode, disables interrupts)
 ;     - IRQ / BRK / NMI RAM vectors (default handlers)
 ;     - Probes & inits all detected I/O cards

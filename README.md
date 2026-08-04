@@ -3,6 +3,9 @@
 
 A 6502 assembly language cartridge template for the [A.C. Wright 6502](https://github.com/acwright/6502-ACE) family of computer systems.
 
+> 📖 **Guide:** [AC6502 Documentation](https://acwright.github.io/6502-DOCS/) — the user's and programmer's guide for the whole family.
+> This template is walked through end to end in [Writing a cartridge](https://acwright.github.io/6502-DOCS/assembly/cartridges).
+
 ## Overview
 
 Cartridges for this system overlay the ROM address space from `$C000–$FFFF`, replacing the Monitor, BASIC interpreter, Wozmon, and CPU vectors with custom code. The Kernal (`$A000–$B7FF`) and character set (`$B800–$BFFF`) remain accessible, providing hardware initialization, character I/O, video, sound, storage, and other system services through a stable jump table.
@@ -138,6 +141,7 @@ Burns `Cart.crt` to an AT28C256 EEPROM using a TL866-compatible programmer and m
 - [6502-EMULATOR](https://github.com/acwright/6502-EMULATOR) — run a cartridge without burning an EEPROM (`make run`)
 - [6502-PRG](https://github.com/acwright/6502-PRG) — the same idea for RAM programs loaded from BASIC
 - [6502-ASM](https://github.com/acwright/6502-ASM) — worked assembly examples
+- [6502-DOCS](https://github.com/acwright/6502-DOCS) — the documentation site: the cross-development and assembly guides, and the printable reference cards
 
 ## License
 
