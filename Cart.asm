@@ -1,6 +1,12 @@
 .setcpu "65C02"
 
+; make VDP=1 builds for an ACE with a 6502-PICOVDP on BIOS 2.x;
+; the default builds for the TMS9918A on BIOS 1.x.
+.ifdef VDP
+.include "6502-VDP.inc"
+.else
 .include "6502.inc"
+.endif
 
 .segment "CART"
 
@@ -24,6 +30,21 @@ CartReset:
   ldx #$ff
   txs                           ; Reset the stack pointer
   jsr KernalInit                ; Initialize all hardware (interrupts left disabled)
+
+.ifdef VDP
+  ; --- VDP build only: refuse to run on BIOS 1.x ---
+  ; A cartridge built with 6502-VDP.inc may call 2.x Kernal entries that are
+  ; bare RTS slots on 1.x, so it says so and stops instead.
+  jsr KernalVersion             ; A = major, X = minor
+  cmp #2
+  bcs @Bios2
+  lda #<NeedsBios2Msg
+  ldy #>NeedsBios2Msg
+  jsr PrintStr
+@Halt:
+  bra @Halt                     ; A cartridge has nothing to return to
+@Bios2:
+.endif
 
   ; --- Optional: play startup beep for audible feedback ---
   jsr Beep                      ; Skips silently if no SID present
@@ -54,6 +75,11 @@ CartReset:
 
 HelloMsg:
   .byte "Hello from Cartridge!", CHAR_CR, CHAR_LF, $00
+
+.ifdef VDP
+NeedsBios2Msg:
+  .byte "NEEDS BIOS 2 AND A 6502-PICOVDP", CHAR_CR, CHAR_LF, $00
+.endif
 
 ; =============================================================================
 ;   IRQ handler — Cartridge must provide this since it owns the IRQ vector
