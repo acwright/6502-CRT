@@ -37,7 +37,7 @@ OUT = $(TARGET)$(SUFFIX)
 
 RUNFLAGS += $(if $(ROM),--rom $(ROM))
 
-.PHONY: all build all-flash view size run eeprom flash configs check-configs clean
+.PHONY: all build all-flash view size run eeprom flash configs check-configs verify-layout clean
 
 all: build
 
@@ -93,6 +93,15 @@ configs:
 
 check-configs:
 	node tools/make-cart-cfg.mjs --check
+
+# The banked configs rest on one guarantee: ld65 writes each MEMORY area that
+# names a file to that file in the order the areas are declared, and that order
+# IS the flash's linear layout. Nothing else in the build depends on it and
+# nothing else would notice if it changed — a future ld65 that reordered areas
+# would produce a valid-looking image with every bank in the wrong place. This
+# builds a cart with a distinct marker in every bank and checks the offsets.
+verify-layout:
+	@node tools/verify-layout.mjs
 
 clean:
 	rm -f $(TARGET).crt $(TARGET).lst $(TARGET).map
