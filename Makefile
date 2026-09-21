@@ -37,12 +37,12 @@ OUT = $(TARGET)$(SUFFIX)
 
 RUNFLAGS += $(if $(ROM),--rom $(ROM))
 
-.PHONY: all build all-flash view run eeprom flash configs check-configs clean
+.PHONY: all build all-flash view size run eeprom flash configs check-configs clean
 
 all: build
 
 build: $(TARGET).asm
-	cl65 -t none $(ASFLAGS) -C $(CONFIG).cfg -l $(OUT).lst -o $(OUT).crt $(TARGET).asm
+	cl65 -t none $(ASFLAGS) -C $(CONFIG).cfg -l $(OUT).lst -m $(OUT).map -o $(OUT).crt $(TARGET).asm
 
 # Every flash target for the current VDP setting, one after the other.
 all-flash:
@@ -52,6 +52,13 @@ all-flash:
 
 view:
 	hexdump -C $(OUT).crt
+
+# How full each bank is — the one number a banked cart author wants constantly
+# and has nowhere good to look for. ld65's map says which segments ended up with
+# something in them; the linker config says how big each one could have been.
+# The report reads both, and works for the flat 32K cart too.
+size: build
+	@node tools/size-report.mjs $(CONFIG).cfg $(OUT).map $(OUT).crt
 
 run:
 	6502 run $(RUNFLAGS) --cart $(OUT).crt
@@ -88,9 +95,9 @@ check-configs:
 	node tools/make-cart-cfg.mjs --check
 
 clean:
-	rm -f $(TARGET).crt $(TARGET).lst
-	rm -f $(TARGET)-VDP.crt $(TARGET)-VDP.lst
+	rm -f $(TARGET).crt $(TARGET).lst $(TARGET).map
+	rm -f $(TARGET)-VDP.crt $(TARGET)-VDP.lst $(TARGET)-VDP.map
 	@for t in $(FLASH_TARGETS); do \
-	  rm -f $(TARGET)-$$t.crt $(TARGET)-$$t.lst; \
-	  rm -f $(TARGET)-VDP-$$t.crt $(TARGET)-VDP-$$t.lst; \
+	  rm -f $(TARGET)-$$t.crt $(TARGET)-$$t.lst $(TARGET)-$$t.map; \
+	  rm -f $(TARGET)-VDP-$$t.crt $(TARGET)-VDP-$$t.lst $(TARGET)-VDP-$$t.map; \
 	done
