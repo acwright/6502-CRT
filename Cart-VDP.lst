@@ -1395,7 +1395,79 @@ Current file: Cart.asm
 000000r 1               .include "6502.inc"
 000000r 1               .endif
 000000r 1               
+000000r 1               ; =============================================================================
+000000r 1               ;   THE FLASH CART BUILD  (make FLASH=128K|256K|512K|1M)
+000000r 1               ; =============================================================================
+000000r 1               ;   A Flash Cart is banked: $C000-$DFFF is an 8 KB window onto whichever bank
+000000r 1               ;   the bank register last selected, and $E000-$FFFF is a fixed 8 KB that is
+000000r 1               ;   always the primary chip's last bank, whatever the register holds.  The
+000000r 1               ;   vectors live there and can never be banked out.
+000000r 1               ;
+000000r 1               ;   Everything new here is inside `.ifdef FLASH`, so `make` with no arguments
+000000r 1               ;   produces the same 32,768 bytes it always has.
+000000r 1               ;
+000000r 1               ;   The mapper is specified in 6502-VCS PLAN.md §2 and is not re-decided here.
+000000r 1               ; =============================================================================
+000000r 1               
+000000r 1               .ifdef FLASH
+000000r 1               
+000000r 1               ; The bank register.  Write-only, 8 bits, at ANY address in $E000-$FFFF; this
+000000r 1               ; one by convention.  A write latches it and reaches no flash — WEB is not
+000000r 1               ; asserted there — so writing the register is never also a flash write.
+000000r 1               ;
+000000r 1               ; Bit 6 selects the secondary chip on a -1M cart.  Bit 7 is latched and goes
+000000r 1               ; nowhere.  Bits above the part's bank count alias down: on a 128K part the
+000000r 1               ; high address pins are not bonded, so $10 is $00.
+000000r 1               BANK      = $E000
+000000r 1               
+000000r 1               ; The register cannot be read back, so a cart that loses track of which bank it
+000000r 1               ; selected has no way to recover it.  The template keeps a shadow in the first
+000000r 1               ; byte of the zero page that 6502.inc §1 marks "Free for a program that has
+000000r 1               ; taken the machine over" — and a cartridge is by definition such a program.
+000000r 1               ;
+000000r 1               ; A cart that pulls in library code has to know this address is claimed.
+000000r 1               BANKSHDW  = $3A
+000000r 1               
+000000r 1               .segment "FIXED"
+000000r 1               
+000000r 1               ; =============================================================================
+000000r 1               ;   SetBank — select which 8 KB bank appears at $C000-$DFFF
+000000r 1               ; =============================================================================
+000000r 1               ;   A = the bank value.  Preserves X and Y.  Must live in FIXED, and must be
+000000r 1               ;   called from FIXED: see "the two bugs" below.
+000000r 1               ;
+000000r 1               ;   The shadow is written FIRST.  If an interrupt lands between the two stores,
+000000r 1               ;   the handler sees a shadow one instruction ahead of the hardware rather than
+000000r 1               ;   one behind, and restoring the hardware from the shadow on the way out puts
+000000r 1               ;   the two back in agreement.  The other order leaves them permanently
+000000r 1               ;   disagreed.
+000000r 1               ; =============================================================================
+000000r 1               
+000000r 1               SetBank:
+000000r 1                 sta BANKSHDW                  ; shadow first — see above
+000000r 1                 sta BANK                      ; latch the register
+000000r 1                 rts
+000000r 1               
+000000r 1               ; =============================================================================
+000000r 1               ;   THE TWO BUGS
+000000r 1               ; =============================================================================
+000000r 1               ;   1. SWITCHING BANKS FROM INSIDE A BANK.  `jsr SetBank` from code at
+000000r 1               ;      $C000-$DFFF returns to an address that no longer holds the calling code.
+000000r 1               ;      The machine does not fault; it executes whatever the new bank has there.
+000000r 1               ;      Always bank-switch from FIXED.
+000000r 1               ;
+000000r 1               ;   2. AN INTERRUPT DURING A BANK-RELATIVE SEQUENCE.  The default Kernal IRQ
+000000r 1               ;      handler lives at $A000-$BFFF and is unaffected.  A cart's OWN handler
+000000r 1               ;      that touches banked data must live in FIXED, and must save the current
+000000r 1               ;      bank from BANKSHDW, select its own, and restore through SetBank before
+000000r 1               ;      it returns.
+000000r 1               ; =============================================================================
+000000r 1               
+000000r 1               .else
+000000r 1               
 000000r 1               .segment "CART"
+000000r 1               
+000000r 1               .endif
 000000r 1               
 000000r 1               ; =============================================================================
 000000r 1               ;   CartReset — Cartridge entry point
@@ -1416,6 +1488,13 @@ Current file: Cart.asm
 000000r 1               CartReset:
 000000r 1  A2 FF          ldx #$ff
 000002r 1  9A             txs                           ; Reset the stack pointer
+000003r 1               
+000003r 1               .ifdef FLASH
+000003r 1                 ; RESB clears the bank register to 0 — its /MR is on the reset line — so the
+000003r 1                 ; shadow starts honest rather than only becoming so at the first SetBank.
+000003r 1                 stz BANKSHDW
+000003r 1               .endif
+000003r 1               
 000003r 1  20 78 A0       jsr KernalInit                ; Initialize all hardware (interrupts left disabled)
 000006r 1               
 000006r 1               .ifdef VDP
@@ -1453,6 +1532,10 @@ Current file: Cart.asm
 00001Fr 1  A0 rr          ldy #>HelloMsg                ; Y = string addr high
 000021r 1  20 90 A0       jsr PrintStr                  ; Print the message (Kernal $A090)
 000024r 1               
+000024r 1               .ifdef FLASH
+000024r 1                 jsr PrintBankedMsg            ; …and one that lives in bank $01
+000024r 1               .endif
+000024r 1               
 000024r 1               @Loop:
 000024r 1  80 FE          bra @Loop                     ; Loop forever
 000026r 1               
@@ -1464,6 +1547,45 @@ Current file: Cart.asm
 000026r 1  48 65 6C 6C    .byte "Hello from Cartridge!", CHAR_CR, CHAR_LF, $00
 00002Ar 1  6F 20 66 72  
 00002Er 1  6F 6D 20 43  
+00003Er 1               
+00003Er 1               .ifdef FLASH
+00003Er 1               
+00003Er 1               ; =============================================================================
+00003Er 1               ;   PrintBankedMsg — a worked cross-bank call
+00003Er 1               ; =============================================================================
+00003Er 1               ;   The shape of this is the whole skill, so the template ships one that runs.
+00003Er 1               ;
+00003Er 1               ;   The caller is in FIXED, the data is in bank $01, and the segment name is
+00003Er 1               ;   the value you write: `.segment "BANK01"` is reached with `lda #$01`.  The
+00003Er 1               ;   bank's contents appear at $C000-$DFFF and nowhere else, so BankedMsg is a
+00003Er 1               ;   $C0xx address in both builds of the listing — that is the window, not the
+00003Er 1               ;   file offset.
+00003Er 1               ;
+00003Er 1               ;   Note what is NOT here: no save and restore of the previous bank.  This runs
+00003Er 1               ;   from CartReset, which knows the register is 0, and it does not return to
+00003Er 1               ;   anything that cares.  A routine called from somewhere that does care reads
+00003Er 1               ;   BANKSHDW first and puts it back through SetBank afterwards.
+00003Er 1               ; =============================================================================
+00003Er 1               
+00003Er 1               PrintBankedMsg:
+00003Er 1                 lda #$01                      ; the bank value IS the segment's name
+00003Er 1                 jsr SetBank                   ; BankedMsg is now at $C000-$DFFF
+00003Er 1                 lda #<BankedMsg
+00003Er 1                 ldy #>BankedMsg
+00003Er 1                 jsr PrintStr                  ; PrintStr is in the Kernal at $A090, not in a
+00003Er 1                                               ;   bank, so the window stays selected across it
+00003Er 1                 stz BANKSHDW                  ; leave bank 0 selected, shadow and all
+00003Er 1                 stz BANK
+00003Er 1                 rts
+00003Er 1               
+00003Er 1               .segment "BANK01"
+00003Er 1               
+00003Er 1               BankedMsg:
+00003Er 1                 .byte "Hello from bank $01!", CHAR_CR, CHAR_LF, $00
+00003Er 1               
+00003Er 1               .segment "FIXED"
+00003Er 1               
+00003Er 1               .endif
 00003Er 1               
 00003Er 1               .ifdef VDP
 00003Er 1               NeedsBios2Msg:

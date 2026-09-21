@@ -8,7 +8,79 @@
 .include "6502.inc"
 .endif
 
+; =============================================================================
+;   THE FLASH CART BUILD  (make FLASH=128K|256K|512K|1M)
+; =============================================================================
+;   A Flash Cart is banked: $C000-$DFFF is an 8 KB window onto whichever bank
+;   the bank register last selected, and $E000-$FFFF is a fixed 8 KB that is
+;   always the primary chip's last bank, whatever the register holds.  The
+;   vectors live there and can never be banked out.
+;
+;   Everything new here is inside `.ifdef FLASH`, so `make` with no arguments
+;   produces the same 32,768 bytes it always has.
+;
+;   The mapper is specified in 6502-VCS PLAN.md §2 and is not re-decided here.
+; =============================================================================
+
+.ifdef FLASH
+
+; The bank register.  Write-only, 8 bits, at ANY address in $E000-$FFFF; this
+; one by convention.  A write latches it and reaches no flash — WEB is not
+; asserted there — so writing the register is never also a flash write.
+;
+; Bit 6 selects the secondary chip on a -1M cart.  Bit 7 is latched and goes
+; nowhere.  Bits above the part's bank count alias down: on a 128K part the
+; high address pins are not bonded, so $10 is $00.
+BANK      = $E000
+
+; The register cannot be read back, so a cart that loses track of which bank it
+; selected has no way to recover it.  The template keeps a shadow in the first
+; byte of the zero page that 6502.inc §1 marks "Free for a program that has
+; taken the machine over" — and a cartridge is by definition such a program.
+;
+; A cart that pulls in library code has to know this address is claimed.
+BANKSHDW  = $3A
+
+.segment "FIXED"
+
+; =============================================================================
+;   SetBank — select which 8 KB bank appears at $C000-$DFFF
+; =============================================================================
+;   A = the bank value.  Preserves X and Y.  Must live in FIXED, and must be
+;   called from FIXED: see "the two bugs" below.
+;
+;   The shadow is written FIRST.  If an interrupt lands between the two stores,
+;   the handler sees a shadow one instruction ahead of the hardware rather than
+;   one behind, and restoring the hardware from the shadow on the way out puts
+;   the two back in agreement.  The other order leaves them permanently
+;   disagreed.
+; =============================================================================
+
+SetBank:
+  sta BANKSHDW                  ; shadow first — see above
+  sta BANK                      ; latch the register
+  rts
+
+; =============================================================================
+;   THE TWO BUGS
+; =============================================================================
+;   1. SWITCHING BANKS FROM INSIDE A BANK.  `jsr SetBank` from code at
+;      $C000-$DFFF returns to an address that no longer holds the calling code.
+;      The machine does not fault; it executes whatever the new bank has there.
+;      Always bank-switch from FIXED.
+;
+;   2. AN INTERRUPT DURING A BANK-RELATIVE SEQUENCE.  The default Kernal IRQ
+;      handler lives at $A000-$BFFF and is unaffected.  A cart's OWN handler
+;      that touches banked data must live in FIXED, and must save the current
+;      bank from BANKSHDW, select its own, and restore through SetBank before
+;      it returns.
+; =============================================================================
+
+.else
+
 .segment "CART"
+
+.endif
 
 ; =============================================================================
 ;   CartReset — Cartridge entry point
@@ -29,6 +101,13 @@
 CartReset:
   ldx #$ff
   txs                           ; Reset the stack pointer
+
+.ifdef FLASH
+  ; RESB clears the bank register to 0 — its /MR is on the reset line — so the
+  ; shadow starts honest rather than only becoming so at the first SetBank.
+  stz BANKSHDW
+.endif
+
   jsr KernalInit                ; Initialize all hardware (interrupts left disabled)
 
 .ifdef VDP
@@ -66,6 +145,10 @@ CartReset:
   ldy #>HelloMsg                ; Y = string addr high
   jsr PrintStr                  ; Print the message (Kernal $A090)
 
+.ifdef FLASH
+  jsr PrintBankedMsg            ; …and one that lives in bank $01
+.endif
+
 @Loop:
   bra @Loop                     ; Loop forever
 
@@ -75,6 +158,45 @@ CartReset:
 
 HelloMsg:
   .byte "Hello from Cartridge!", CHAR_CR, CHAR_LF, $00
+
+.ifdef FLASH
+
+; =============================================================================
+;   PrintBankedMsg — a worked cross-bank call
+; =============================================================================
+;   The shape of this is the whole skill, so the template ships one that runs.
+;
+;   The caller is in FIXED, the data is in bank $01, and the segment name is
+;   the value you write: `.segment "BANK01"` is reached with `lda #$01`.  The
+;   bank's contents appear at $C000-$DFFF and nowhere else, so BankedMsg is a
+;   $C0xx address in both builds of the listing — that is the window, not the
+;   file offset.
+;
+;   Note what is NOT here: no save and restore of the previous bank.  This runs
+;   from CartReset, which knows the register is 0, and it does not return to
+;   anything that cares.  A routine called from somewhere that does care reads
+;   BANKSHDW first and puts it back through SetBank afterwards.
+; =============================================================================
+
+PrintBankedMsg:
+  lda #$01                      ; the bank value IS the segment's name
+  jsr SetBank                   ; BankedMsg is now at $C000-$DFFF
+  lda #<BankedMsg
+  ldy #>BankedMsg
+  jsr PrintStr                  ; PrintStr is in the Kernal at $A090, not in a
+                                ;   bank, so the window stays selected across it
+  stz BANKSHDW                  ; leave bank 0 selected, shadow and all
+  stz BANK
+  rts
+
+.segment "BANK01"
+
+BankedMsg:
+  .byte "Hello from bank $01!", CHAR_CR, CHAR_LF, $00
+
+.segment "FIXED"
+
+.endif
 
 .ifdef VDP
 NeedsBios2Msg:
