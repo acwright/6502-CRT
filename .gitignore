@@ -14,6 +14,18 @@
 *.map
 *.sym
 
+# Flash Cart images. Cart.crt and Cart-VDP.crt are committed so a reader can
+# look at what the template produces; a 1 MB image of mostly $FF is not worth
+# the same. `make all-flash` rebuilds them.
+Cart-128K.*
+Cart-256K.*
+Cart-512K.*
+Cart-1M.*
+Cart-VDP-128K.*
+Cart-VDP-256K.*
+Cart-VDP-512K.*
+Cart-VDP-1M.*
+
 # Backup and temporary files
 *~
 *.bak
