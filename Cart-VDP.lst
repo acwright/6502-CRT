@@ -1585,6 +1585,235 @@ Current file: Cart.asm
 00003Er 1               
 00003Er 1               .segment "FIXED"
 00003Er 1               
+00003Er 1               ; =============================================================================
+00003Er 1               ;   SAVES — a cartridge writing to its own flash       (COMMENTED OUT ON PURPOSE)
+00003Er 1               ; =============================================================================
+00003Er 1               ;   A cart that erases a sector every time it runs is not a good default, so
+00003Er 1               ;   this ships as comments.  Uncomment it, set SAVE_BANK for your target, and
+00003Er 1               ;   call SaveGame / LoadGame.
+00003Er 1               ;
+00003Er 1               ;   The command set is 6502-VCS PLAN.md §3.  The runnable version of this, with
+00003Er 1               ;   a chapter around it, is the 6502-DOCS sample `flash-save.asm` and *Bigger
+00003Er 1               ;   cartridges*; what is here is the same thing shaped as something you would
+00003Er 1               ;   keep.
+00003Er 1               ;
+00003Er 1               ;   WHERE A SAVE GOES
+00003Er 1               ;   -----------------
+00003Er 1               ;   By convention across the whole rollout, saves live in the TOP SECTOR OF THE
+00003Er 1               ;   HIGHEST USABLE BANK.  The unit is the chip's 4 KB erase sector, which is
+00003Er 1               ;   also the record size of the `.sav` sidecar (6502-VCS PLAN.md §4) — so
+00003Er 1               ;   `6502-flash merge` and every emulator's save file are talking about the same
+00003Er 1               ;   4 KB as this routine is.
+00003Er 1               ;
+00003Er 1               ;   Each bank is 8 KB, which is two sectors.  The top one is the upper half of
+00003Er 1               ;   the window, $D000-$DFFF:
+00003Er 1               ;
+00003Er 1               ;     target   highest usable bank   fixed bank   that bank's sectors   save
+00003Er 1               ;     ------   -------------------   ----------   -------------------   ----
+00003Er 1               ;     128K     $0E                   $0F          28, 29                29
+00003Er 1               ;     256K     $1E                   $1F          60, 61                61
+00003Er 1               ;     512K     $3E                   $3F          124, 125              125
+00003Er 1               ;     1M       $7F  (U2's last)      $3F  (U1)    254, 255              255
+00003Er 1               ;
+00003Er 1               ;   On a -1M cart only U1's bank $3F is fixed, so U2's $7F is usable and is the
+00003Er 1               ;   highest bank there is.
+00003Er 1               ;
+00003Er 1               ;   WHY IT RUNS FROM RAM
+00003Er 1               ;   --------------------
+00003Er 1               ;   While the primary chip is programming or erasing, EVERY read of it returns
+00003Er 1               ;   status bits instead of data — the fixed region included, which is where this
+00003Er 1               ;   code and the vectors live.  A routine that erases a sector and then fetches
+00003Er 1               ;   its own next instruction reads status and goes somewhere else entirely.  So
+00003Er 1               ;   it is copied to RAM and called there, with SEI, and with the video card's
+00003Er 1               ;   interrupt off if you have enabled it: an IRQ during the window fetches a
+00003Er 1               ;   vector out of a chip that is answering with status.
+00003Er 1               ;
+00003Er 1               ;   6502-EMULATOR models that busy window, so a routine that gets this wrong
+00003Er 1               ;   hangs there exactly as it would on the board.  The PicoCalc port and the DB
+00003Er 1               ;   Emulator complete instantly and would run it happily — which is why the
+00003Er 1               ;   emulator is where a self-programming cart gets developed.  It is recorded in
+00003Er 1               ;   6502-DOCS ACCURACY.md as A76.
+00003Er 1               ;
+00003Er 1               ;   The copy needs no relocating: every address below is an absolute constant
+00003Er 1               ;   and every branch is relative, so the same bytes work wherever they land.
+00003Er 1               ;   That is worth re-checking whenever you change it — one `jsr` to a label
+00003Er 1               ;   inside the routine would silently jump back into the copy in the fixed
+00003Er 1               ;   region and run there, which is the bug this whole section exists to avoid.
+00003Er 1               ;
+00003Er 1               ;   SETTING THE BANK BEFORE EVERY COMMAND CYCLE
+00003Er 1               ;   -------------------------------------------
+00003Er 1               ;   The unlock addresses are FLASH addresses and you can only reach them through
+00003Er 1               ;   the window.  Flash $5555 is offset $1555 of bank $02; flash $2AAA is offset
+00003Er 1               ;   $0AAA of bank $01.  There is no way to write both without a bank switch in
+00003Er 1               ;   between, so the register is set before EVERY cycle — not once at the start.
+00003Er 1               ;   Getting this wrong is the single commonest way a save routine does nothing
+00003Er 1               ;   at all.
+00003Er 1               ;
+00003Er 1               ;   Writing the register between command cycles is safe: those writes go to
+00003Er 1               ;   $E000+ and never assert flash WEB, so they are not themselves part of the
+00003Er 1               ;   sequence.
+00003Er 1               ;
+00003Er 1               ;   WRITING TO U2 IS EASIER
+00003Er 1               ;   -----------------------
+00003Er 1               ;   On a -1M cart, U2 only sees a bus cycle while CE2B is low — that is, only
+00003Er 1               ;   while bit 6 of the register is set.  So a routine that programs U2 can stay
+00003Er 1               ;   in FIXED on U1 and never be copied to RAM at all: U1 stays readable the
+00003Er 1               ;   whole time.  Set bit 6 in every bank value used in the sequence.
+00003Er 1               ;
+00003Er 1               ; -----------------------------------------------------------------------------
+00003Er 1               ;
+00003Er 1               ; SAVE_BANK   = $0E             ; the table above — change this for your target
+00003Er 1               ; SAVE_ADDR   = $D000           ; the top 4 KB sector of that bank
+00003Er 1               ; RAM_ROUTINE = $0800           ; free RAM; a cartridge has all of it
+00003Er 1               ;
+00003Er 1               ; ; The two unlock cycles, as the CPU sees them.
+00003Er 1               ; UNLOCK1_BANK = $02
+00003Er 1               ; UNLOCK1      = $D555          ; = flash $5555
+00003Er 1               ; UNLOCK2_BANK = $01
+00003Er 1               ; UNLOCK2      = $CAAA          ; = flash $2AAA
+00003Er 1               ;
+00003Er 1               ; ; ---------------------------------------------------------------------------
+00003Er 1               ; ;   LoadGame — A = the saved byte, or $FF if nothing has been saved
+00003Er 1               ; ; ---------------------------------------------------------------------------
+00003Er 1               ; ;   Reading needs no command sequence at all: select the bank and read.  $FF is
+00003Er 1               ; ;   what an erased sector holds, and the linker fills every unused byte of the
+00003Er 1               ; ;   image with $FF for exactly this reason, so "erased" and "never written"
+00003Er 1               ; ;   are the same answer and you do not need a separate valid flag.
+00003Er 1               ; ;
+00003Er 1               ; ;   Called from FIXED, like everything that switches banks.
+00003Er 1               ; ; ---------------------------------------------------------------------------
+00003Er 1               ;
+00003Er 1               ; LoadGame:
+00003Er 1               ;   lda BANKSHDW                ; remember what the caller had selected
+00003Er 1               ;   pha
+00003Er 1               ;   lda #SAVE_BANK
+00003Er 1               ;   jsr SetBank
+00003Er 1               ;   lda SAVE_ADDR               ; the save
+00003Er 1               ;   tax
+00003Er 1               ;   pla
+00003Er 1               ;   jsr SetBank                 ; put the caller's bank back
+00003Er 1               ;   txa
+00003Er 1               ;   rts
+00003Er 1               ;
+00003Er 1               ; ; ---------------------------------------------------------------------------
+00003Er 1               ; ;   SaveGame — A = the byte to save
+00003Er 1               ; ; ---------------------------------------------------------------------------
+00003Er 1               ; ;   Copies the RAM routine down and calls it there.  Erases the sector, then
+00003Er 1               ; ;   programs one byte into it.  Both are needed: a byte program can only turn
+00003Er 1               ; ;   bits OFF (new = old AND data), so a byte that has ever been written cannot
+00003Er 1               ; ;   be changed to a larger value without erasing the 4 KB it lives in first.
+00003Er 1               ; ;
+00003Er 1               ; ;   Real saves are a structure, not a byte.  Erase once, then program the
+00003Er 1               ; ;   whole record in a loop before the sector is used again — an erase per byte
+00003Er 1               ; ;   would spend the sector's ~100,000 cycles in an afternoon.
+00003Er 1               ; ; ---------------------------------------------------------------------------
+00003Er 1               ;
+00003Er 1               ; SaveGame:
+00003Er 1               ;   sta SaveValue               ; the RAM routine reads it from here
+00003Er 1               ;   ldx #$00
+00003Er 1               ; @Copy:
+00003Er 1               ;   lda RamSave,x
+00003Er 1               ;   sta RAM_ROUTINE,x
+00003Er 1               ;   inx
+00003Er 1               ;   cpx #(RamSaveEnd - RamSave)
+00003Er 1               ;   bne @Copy
+00003Er 1               ;   jmp RAM_ROUTINE             ; jmp, not jsr: it rts's to SaveGame's caller
+00003Er 1               ;
+00003Er 1               ; SaveValue:
+00003Er 1               ;   .byte $00
+00003Er 1               ;
+00003Er 1               ; ; ---------------------------------------------------------------------------
+00003Er 1               ; ;   RamSave — runs at RAM_ROUTINE, never where it is assembled
+00003Er 1               ; ; ---------------------------------------------------------------------------
+00003Er 1               ;
+00003Er 1               ; RamSave:
+00003Er 1               ;   sei                         ; a vector fetch during the busy window would
+00003Er 1               ;                               ;   read status bits instead of an address
+00003Er 1               ;
+00003Er 1               ;   ; --- Sector erase: $5555<-AA, $2AAA<-55, $5555<-80,
+00003Er 1               ;   ;                   $5555<-AA, $2AAA<-55, sector<-30
+00003Er 1               ;   lda #UNLOCK1_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$AA
+00003Er 1               ;   sta UNLOCK1
+00003Er 1               ;   lda #UNLOCK2_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$55
+00003Er 1               ;   sta UNLOCK2
+00003Er 1               ;   lda #UNLOCK1_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$80
+00003Er 1               ;   sta UNLOCK1
+00003Er 1               ;   lda #UNLOCK1_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$AA
+00003Er 1               ;   sta UNLOCK1
+00003Er 1               ;   lda #UNLOCK2_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$55
+00003Er 1               ;   sta UNLOCK2
+00003Er 1               ;   lda #SAVE_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$30
+00003Er 1               ;   sta SAVE_ADDR               ; any address in the sector picks the sector
+00003Er 1               ;
+00003Er 1               ;   ; DQ7 data polling.  DQ7 reads 0 for the whole ~25 ms erase and 1 once the
+00003Er 1               ;   ; sector is $FF again, so this is just "wait for the top bit".
+00003Er 1               ; @EraseWait:
+00003Er 1               ;   lda SAVE_ADDR
+00003Er 1               ;   bpl @EraseWait
+00003Er 1               ;
+00003Er 1               ;   ; The DQ6 toggle loop is the alternative, and works for an erase or a
+00003Er 1               ;   ; program without knowing what was written: DQ6 flips on every read while
+00003Er 1               ;   ; the chip is busy and stops flipping when it is done, so two reads that
+00003Er 1               ;   ; agree mean finished.  Either loop is correct; use one.
+00003Er 1               ;   ;
+00003Er 1               ;   ; @EraseWait:
+00003Er 1               ;   ;   lda SAVE_ADDR
+00003Er 1               ;   ;   eor SAVE_ADDR
+00003Er 1               ;   ;   and #$40
+00003Er 1               ;   ;   bne @EraseWait
+00003Er 1               ;
+00003Er 1               ;   ; --- Byte program: $5555<-AA, $2AAA<-55, $5555<-A0, target<-data
+00003Er 1               ;   lda #UNLOCK1_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$AA
+00003Er 1               ;   sta UNLOCK1
+00003Er 1               ;   lda #UNLOCK2_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$55
+00003Er 1               ;   sta UNLOCK2
+00003Er 1               ;   lda #UNLOCK1_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda #$A0
+00003Er 1               ;   sta UNLOCK1
+00003Er 1               ;   lda #SAVE_BANK
+00003Er 1               ;   sta BANK
+00003Er 1               ;   lda SaveValue
+00003Er 1               ;   sta SAVE_ADDR
+00003Er 1               ;
+00003Er 1               ;   ; DQ7 is the COMPLEMENT of the bit just written until the ~20 us window
+00003Er 1               ;   ; closes, so the read matches the value only when the chip is done.  It also
+00003Er 1               ;   ; never matches for a bit the chip could not set — a 0 asked to become a 1
+00003Er 1               ;   ; without an erase — which is the hardware telling you about bug 2 above.
+00003Er 1               ; @ProgramWait:
+00003Er 1               ;   lda SAVE_ADDR
+00003Er 1               ;   eor SaveValue
+00003Er 1               ;   and #$80
+00003Er 1               ;   bne @ProgramWait
+00003Er 1               ;
+00003Er 1               ;   stz BANK                    ; leave the register and its shadow agreed and
+00003Er 1               ;   stz BANKSHDW                ;   at 0, the way reset left them
+00003Er 1               ;   cli
+00003Er 1               ;   rts
+00003Er 1               ;
+00003Er 1               ; RamSaveEnd:
+00003Er 1               ;
+00003Er 1               ; ; The copy loop counts in X, so the routine has to fit in a page.
+00003Er 1               ; .assert (RamSaveEnd - RamSave) < 256, error, "the RAM save routine no longer fits in one page"
+00003Er 1               ;
+00003Er 1               ; =============================================================================
+00003Er 1               
 00003Er 1               .endif
 00003Er 1               
 00003Er 1               .ifdef VDP

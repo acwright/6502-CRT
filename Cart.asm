@@ -196,6 +196,235 @@ BankedMsg:
 
 .segment "FIXED"
 
+; =============================================================================
+;   SAVES — a cartridge writing to its own flash       (COMMENTED OUT ON PURPOSE)
+; =============================================================================
+;   A cart that erases a sector every time it runs is not a good default, so
+;   this ships as comments.  Uncomment it, set SAVE_BANK for your target, and
+;   call SaveGame / LoadGame.
+;
+;   The command set is 6502-VCS PLAN.md §3.  The runnable version of this, with
+;   a chapter around it, is the 6502-DOCS sample `flash-save.asm` and *Bigger
+;   cartridges*; what is here is the same thing shaped as something you would
+;   keep.
+;
+;   WHERE A SAVE GOES
+;   -----------------
+;   By convention across the whole rollout, saves live in the TOP SECTOR OF THE
+;   HIGHEST USABLE BANK.  The unit is the chip's 4 KB erase sector, which is
+;   also the record size of the `.sav` sidecar (6502-VCS PLAN.md §4) — so
+;   `6502-flash merge` and every emulator's save file are talking about the same
+;   4 KB as this routine is.
+;
+;   Each bank is 8 KB, which is two sectors.  The top one is the upper half of
+;   the window, $D000-$DFFF:
+;
+;     target   highest usable bank   fixed bank   that bank's sectors   save
+;     ------   -------------------   ----------   -------------------   ----
+;     128K     $0E                   $0F          28, 29                29
+;     256K     $1E                   $1F          60, 61                61
+;     512K     $3E                   $3F          124, 125              125
+;     1M       $7F  (U2's last)      $3F  (U1)    254, 255              255
+;
+;   On a -1M cart only U1's bank $3F is fixed, so U2's $7F is usable and is the
+;   highest bank there is.
+;
+;   WHY IT RUNS FROM RAM
+;   --------------------
+;   While the primary chip is programming or erasing, EVERY read of it returns
+;   status bits instead of data — the fixed region included, which is where this
+;   code and the vectors live.  A routine that erases a sector and then fetches
+;   its own next instruction reads status and goes somewhere else entirely.  So
+;   it is copied to RAM and called there, with SEI, and with the video card's
+;   interrupt off if you have enabled it: an IRQ during the window fetches a
+;   vector out of a chip that is answering with status.
+;
+;   6502-EMULATOR models that busy window, so a routine that gets this wrong
+;   hangs there exactly as it would on the board.  The PicoCalc port and the DB
+;   Emulator complete instantly and would run it happily — which is why the
+;   emulator is where a self-programming cart gets developed.  It is recorded in
+;   6502-DOCS ACCURACY.md as A76.
+;
+;   The copy needs no relocating: every address below is an absolute constant
+;   and every branch is relative, so the same bytes work wherever they land.
+;   That is worth re-checking whenever you change it — one `jsr` to a label
+;   inside the routine would silently jump back into the copy in the fixed
+;   region and run there, which is the bug this whole section exists to avoid.
+;
+;   SETTING THE BANK BEFORE EVERY COMMAND CYCLE
+;   -------------------------------------------
+;   The unlock addresses are FLASH addresses and you can only reach them through
+;   the window.  Flash $5555 is offset $1555 of bank $02; flash $2AAA is offset
+;   $0AAA of bank $01.  There is no way to write both without a bank switch in
+;   between, so the register is set before EVERY cycle — not once at the start.
+;   Getting this wrong is the single commonest way a save routine does nothing
+;   at all.
+;
+;   Writing the register between command cycles is safe: those writes go to
+;   $E000+ and never assert flash WEB, so they are not themselves part of the
+;   sequence.
+;
+;   WRITING TO U2 IS EASIER
+;   -----------------------
+;   On a -1M cart, U2 only sees a bus cycle while CE2B is low — that is, only
+;   while bit 6 of the register is set.  So a routine that programs U2 can stay
+;   in FIXED on U1 and never be copied to RAM at all: U1 stays readable the
+;   whole time.  Set bit 6 in every bank value used in the sequence.
+;
+; -----------------------------------------------------------------------------
+;
+; SAVE_BANK   = $0E             ; the table above — change this for your target
+; SAVE_ADDR   = $D000           ; the top 4 KB sector of that bank
+; RAM_ROUTINE = $0800           ; free RAM; a cartridge has all of it
+;
+; ; The two unlock cycles, as the CPU sees them.
+; UNLOCK1_BANK = $02
+; UNLOCK1      = $D555          ; = flash $5555
+; UNLOCK2_BANK = $01
+; UNLOCK2      = $CAAA          ; = flash $2AAA
+;
+; ; ---------------------------------------------------------------------------
+; ;   LoadGame — A = the saved byte, or $FF if nothing has been saved
+; ; ---------------------------------------------------------------------------
+; ;   Reading needs no command sequence at all: select the bank and read.  $FF is
+; ;   what an erased sector holds, and the linker fills every unused byte of the
+; ;   image with $FF for exactly this reason, so "erased" and "never written"
+; ;   are the same answer and you do not need a separate valid flag.
+; ;
+; ;   Called from FIXED, like everything that switches banks.
+; ; ---------------------------------------------------------------------------
+;
+; LoadGame:
+;   lda BANKSHDW                ; remember what the caller had selected
+;   pha
+;   lda #SAVE_BANK
+;   jsr SetBank
+;   lda SAVE_ADDR               ; the save
+;   tax
+;   pla
+;   jsr SetBank                 ; put the caller's bank back
+;   txa
+;   rts
+;
+; ; ---------------------------------------------------------------------------
+; ;   SaveGame — A = the byte to save
+; ; ---------------------------------------------------------------------------
+; ;   Copies the RAM routine down and calls it there.  Erases the sector, then
+; ;   programs one byte into it.  Both are needed: a byte program can only turn
+; ;   bits OFF (new = old AND data), so a byte that has ever been written cannot
+; ;   be changed to a larger value without erasing the 4 KB it lives in first.
+; ;
+; ;   Real saves are a structure, not a byte.  Erase once, then program the
+; ;   whole record in a loop before the sector is used again — an erase per byte
+; ;   would spend the sector's ~100,000 cycles in an afternoon.
+; ; ---------------------------------------------------------------------------
+;
+; SaveGame:
+;   sta SaveValue               ; the RAM routine reads it from here
+;   ldx #$00
+; @Copy:
+;   lda RamSave,x
+;   sta RAM_ROUTINE,x
+;   inx
+;   cpx #(RamSaveEnd - RamSave)
+;   bne @Copy
+;   jmp RAM_ROUTINE             ; jmp, not jsr: it rts's to SaveGame's caller
+;
+; SaveValue:
+;   .byte $00
+;
+; ; ---------------------------------------------------------------------------
+; ;   RamSave — runs at RAM_ROUTINE, never where it is assembled
+; ; ---------------------------------------------------------------------------
+;
+; RamSave:
+;   sei                         ; a vector fetch during the busy window would
+;                               ;   read status bits instead of an address
+;
+;   ; --- Sector erase: $5555<-AA, $2AAA<-55, $5555<-80,
+;   ;                   $5555<-AA, $2AAA<-55, sector<-30
+;   lda #UNLOCK1_BANK
+;   sta BANK
+;   lda #$AA
+;   sta UNLOCK1
+;   lda #UNLOCK2_BANK
+;   sta BANK
+;   lda #$55
+;   sta UNLOCK2
+;   lda #UNLOCK1_BANK
+;   sta BANK
+;   lda #$80
+;   sta UNLOCK1
+;   lda #UNLOCK1_BANK
+;   sta BANK
+;   lda #$AA
+;   sta UNLOCK1
+;   lda #UNLOCK2_BANK
+;   sta BANK
+;   lda #$55
+;   sta UNLOCK2
+;   lda #SAVE_BANK
+;   sta BANK
+;   lda #$30
+;   sta SAVE_ADDR               ; any address in the sector picks the sector
+;
+;   ; DQ7 data polling.  DQ7 reads 0 for the whole ~25 ms erase and 1 once the
+;   ; sector is $FF again, so this is just "wait for the top bit".
+; @EraseWait:
+;   lda SAVE_ADDR
+;   bpl @EraseWait
+;
+;   ; The DQ6 toggle loop is the alternative, and works for an erase or a
+;   ; program without knowing what was written: DQ6 flips on every read while
+;   ; the chip is busy and stops flipping when it is done, so two reads that
+;   ; agree mean finished.  Either loop is correct; use one.
+;   ;
+;   ; @EraseWait:
+;   ;   lda SAVE_ADDR
+;   ;   eor SAVE_ADDR
+;   ;   and #$40
+;   ;   bne @EraseWait
+;
+;   ; --- Byte program: $5555<-AA, $2AAA<-55, $5555<-A0, target<-data
+;   lda #UNLOCK1_BANK
+;   sta BANK
+;   lda #$AA
+;   sta UNLOCK1
+;   lda #UNLOCK2_BANK
+;   sta BANK
+;   lda #$55
+;   sta UNLOCK2
+;   lda #UNLOCK1_BANK
+;   sta BANK
+;   lda #$A0
+;   sta UNLOCK1
+;   lda #SAVE_BANK
+;   sta BANK
+;   lda SaveValue
+;   sta SAVE_ADDR
+;
+;   ; DQ7 is the COMPLEMENT of the bit just written until the ~20 us window
+;   ; closes, so the read matches the value only when the chip is done.  It also
+;   ; never matches for a bit the chip could not set — a 0 asked to become a 1
+;   ; without an erase — which is the hardware telling you about bug 2 above.
+; @ProgramWait:
+;   lda SAVE_ADDR
+;   eor SaveValue
+;   and #$80
+;   bne @ProgramWait
+;
+;   stz BANK                    ; leave the register and its shadow agreed and
+;   stz BANKSHDW                ;   at 0, the way reset left them
+;   cli
+;   rts
+;
+; RamSaveEnd:
+;
+; ; The copy loop counts in X, so the routine has to fit in a page.
+; .assert (RamSaveEnd - RamSave) < 256, error, "the RAM save routine no longer fits in one page"
+;
+; =============================================================================
+
 .endif
 
 .ifdef VDP
