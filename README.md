@@ -12,6 +12,13 @@ Cartridges for this system overlay the ROM address space from `$C000–$FFFF`, r
 
 The template builds two ways from the same source: `make` for any ACE on BIOS 1.x with a TMS9918A, and `make VDP=1` for an ACE converted to a [6502-PICOVDP](https://github.com/acwright/6502-PICOVDP) on BIOS 2.x. See [Building for the 6502-PICOVDP](#building-for-the-6502-picovdp).
 
+When the cartridge works, [6502-ASM](https://github.com/acwright/6502-ASM) is
+where a small one goes: demos, samples, scratchpads and tests, each in a
+directory of its own, and `HelloWorldCart` and `BankedDemo` there are
+cartridges of this shape. [6502-BAS](https://github.com/acwright/6502-BAS) and
+[6502-C](https://github.com/acwright/6502-C) are the same collection for BASIC
+and C. A finished game or application gets a repository of its own instead.
+
 ### How It Works
 
 1. The cartridge ROM physically overrides the BIOS ROM in the `$C000–$FFFF` range
@@ -173,7 +180,9 @@ Burns `Cart.crt` to an AT28C256 EEPROM using a TL866-compatible programmer and m
 - [6502-PICOVDP](https://github.com/acwright/6502-PICOVDP) — the video card `6502-VDP.inc` is for
 - [6502-EMULATOR](https://github.com/acwright/6502-EMULATOR) — run a cartridge without burning an EEPROM (`make run`)
 - [6502-PRG](https://github.com/acwright/6502-PRG) — the same idea for RAM programs loaded from BASIC
-- [6502-ASM](https://github.com/acwright/6502-ASM) — worked assembly examples
+- [6502-BIN](https://github.com/acwright/6502-BIN) — the same idea for a raw binary with no BASIC stub
+- [6502-ASM](https://github.com/acwright/6502-ASM) — where small assembly programs live: demos, samples and tests, with worked examples of this template
+- [6502-BAS](https://github.com/acwright/6502-BAS) / [6502-C](https://github.com/acwright/6502-C) — the same collection for BASIC listings and for C
 - [6502-DOCS](https://github.com/acwright/6502-DOCS) — the documentation site: the cross-development and assembly guides, and the printable reference cards
 
 ## License
