@@ -44,3 +44,7 @@ Thumbs.db
 VDP-ASSESSMENT.md
 VDP-PLAN.md
 /PLAN.md
+
+# The Flash Cart's normative spec lives in 6502-VCS/PLAN.md, which IS tracked
+# there — §1 naming, §2 the mapper, §3 the flash command set, §4 saves. The
+# sources here cite it by section number.
