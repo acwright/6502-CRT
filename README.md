@@ -37,6 +37,8 @@ and C. A finished game or application gets a repository of its own instead.
 | `$C000–$FFF9` | **Cartridge ROM** — your code goes here |
 | `$FFFA–$FFFF` | **CPU vectors** — NMI, RESET, IRQ (supplied by cartridge) |
 
+This is the flat 32 KB cartridge. A **Flash Cart** splits `$C000–$FFFF` into a switchable 8 KB window and a fixed 8 KB the vectors live in, for 120 KB to 1 MB of code — see [Building for the Flash Cart](#building-for-the-flash-cart).
+
 ### Kernal Services
 
 After calling `KernalInit`, the full Kernal jump table is available. Key entry points:
@@ -102,6 +104,97 @@ What is different on BIOS 2.x:
 - **`BRK_PTR` points at the Kernal's BRK report**, which warm-starts BASIC at `$C000`. A cartridge replaces BASIC, so point `BRK_PTR` at a handler of your own if the cartridge can hit a `BRK`.
 - **`VideoSetColor` sets the pen**, the colour of text printed from then on, and the border follows the background.
 
+## Building for the Flash Cart
+
+`make FLASH=512K` builds `Cart-512K.crt`: a **banked** cartridge for the AC6502 Flash Cart, a byte-exact image of one or two SST39SF0x0 flash chips instead of a 32 KB EEPROM. Everything it adds to `Cart.asm` is inside `.ifdef FLASH`, so `make` with no arguments still produces the same 32,768 bytes it always has.
+
+**The ROM Cart is not replaced.** This is a second axis, like `VDP=1`, and the two compose.
+
+### The five sizes, and how they are named
+
+```
+Cart[-VDP][-<target>].crt
+```
+
+| Target | Bytes | Part | Mapper | Usable banks | Fixed bank | Code space |
+|---|---|---|---|---|---|---|
+| *(none)* | 32,768 | 28C256 / 27C256 | flat | — | — | 16,378 bytes |
+| `-128K` | 131,072 | SST39SF010A | banked | `$00`–`$0E` | `$0F` | 120 KB banked + 8 KB fixed |
+| `-256K` | 262,144 | SST39SF020A | banked | `$00`–`$1E` | `$1F` | 240 KB banked + 8 KB fixed |
+| `-512K` | 524,288 | SST39SF040 | banked | `$00`–`$3E` | `$3F` | 504 KB banked + 8 KB fixed |
+| `-1M` | 1,048,576 | SST39SF040 ×2 | banked | `$00`–`$3E`, `$40`–`$7F` | `$3F` | 1,016 KB banked + 8 KB fixed |
+
+**`-VDP` comes first, then the target** — `Cart-VDP-512K.crt`, never `Cart-512K-VDP.crt`. The build variant, then the hardware target. The Makefile is the one place that ordering can be enforced, and it enforces it.
+
+A `.crt` is a byte-exact image of the chip and nothing else: no header, no footer, no metadata. **The mapper is decided by the file's size, never by its name** — a loader that sees 262,144 bytes loads a 256K cart whatever the file is called. The name is for whoever is reading `ls`.
+
+### The memory map
+
+| Range | Contents |
+|---|---|
+| `$C000–$DFFF` | **switchable window** — 8 KB of whichever bank the register last selected |
+| `$E000–$FFF9` | **fixed region** — always the primary chip's last 8 KB, whatever the register holds |
+| `$FFFA–$FFFF` | **CPU vectors**, inside the fixed region |
+
+The fixed region is the whole point of the arrangement: **the vectors can never be banked out from under the CPU**, so a reset or an interrupt always lands on real code no matter which bank was selected when it happened.
+
+The linker config gives each bank a segment, and **the segment's name is the value you write**:
+
+```asm
+.segment "BANK07"               ; reached with lda #$07 / jsr SetBank
+Level1Data:  .byte ...
+```
+
+`$E000` is the bank register. It is **write-only** — eight bits, at *any* address in `$E000–$FFFF` — and a write there latches it and reaches no flash, so writing the register is never also a flash write. `RESB` clears it to 0. Bits above the part's bank count alias down, bit 6 selects the second chip on a `-1M` cart, and bit 7 goes nowhere.
+
+### `SetBank` and the shadow
+
+```asm
+.segment "FIXED"
+
+SetBank:                        ; A = bank value; preserves X and Y
+  sta BANKSHDW                  ; shadow first
+  sta BANK                      ; then the register
+  rts
+```
+
+The register **cannot be read back**, so a cart that loses track of which bank it selected has no way to recover it. `BANKSHDW` (`$3A`, the first byte `6502.inc` marks free for a program that has taken the machine over) is the only record there is, and the template claims that byte and says so.
+
+The shadow is written **first**, deliberately. If an interrupt lands between the two stores, the handler sees a shadow one instruction *ahead* of the hardware rather than one behind, and restoring the hardware from the shadow on the way out puts the two back in agreement. The other order leaves them permanently disagreed.
+
+### The two bugs
+
+1. **Switching banks from inside a bank.** `jsr SetBank` from code at `$C000–$DFFF` returns to an address that no longer holds the calling code. The machine does not fault; it runs whatever the new bank has there. **Always bank-switch from `FIXED`.**
+2. **An interrupt during a bank-relative sequence.** The default Kernal IRQ handler lives at `$A000–$BFFF` and is unaffected. A cartridge's *own* handler that touches banked data must live in `FIXED`, and must save the current bank from `BANKSHDW`, select its own, and restore through `SetBank` before it returns.
+
+Everything that must live in `FIXED`: the reset, IRQ and NMI entry points and their trampolines; `SetBank` itself; any routine that calls into a bank and expects to come back; and the *caller* of a flash-writing routine — the routine itself runs from RAM.
+
+`Cart.asm` ships a worked cross-bank call — a message in `BANK01` printed by a routine in `FIXED` — because the shape of it is the whole skill.
+
+### Build commands
+
+| Command | Output |
+|---|---|
+| `make` | `Cart.crt`, 32 KB, unchanged |
+| `make VDP=1` | `Cart-VDP.crt`, unchanged |
+| `make FLASH=512K` | `Cart-512K.crt` |
+| `make VDP=1 FLASH=1M` | `Cart-VDP-1M.crt` |
+| `make all-flash` | every `FLASH` target for the current `VDP` setting |
+| `make run FLASH=512K` | runs it in the emulator |
+| `make flash FLASH=512K` | burns it through the Flash Helper with `6502-flash program` |
+| `make configs` / `check-configs` | regenerate the four banked linker configs; `--check` fails on a stale one |
+| `make clean` | removes every variant, all ten names |
+
+**`make eeprom` refuses when `FLASH` is set**, and says where to go instead. A 512 KB image silently truncated into a 28C256 is a confusing afternoon.
+
+The four `.cfg` files are generated by `tools/make-cart-cfg.mjs` and committed — 15 to 127 near-identical stanzas is how a hand-written set drifts — so they can be read, diffed and copied.
+
+### Saves
+
+A Flash Cart can write to itself, which is how a cartridge saves: erase a 4 KB sector, then program bytes into it. `Cart.asm` carries a **commented** `SaveGame` / `LoadGame` pair showing the command sequences, why the routine has to run from RAM with interrupts off, and both of the standard polling loops. By convention across the family, saves live in the **top 4 KB sector of the highest usable bank**, which is the same unit the `.sav` sidecar and `6502-flash merge` work in.
+
+A save written while testing **can never end up on a chip by accident**: emulators keep it in a `<stem>.sav` file beside the `.crt`, the `.crt` itself is opened read-only, and `6502-flash program` has no flag that folds one in. For the whole story, with a runnable sample, see the 6502-DOCS chapter *Bigger cartridges*.
+
 ## Building
 
 ### Prerequisites
@@ -131,6 +224,7 @@ Installed via the [6502-EMULATOR](https://github.com/acwright/6502-EMULATOR) app
 |---------|-------------|
 | `make` | Build the cartridge ROM (`Cart.crt`) |
 | `make VDP=1` | Build the 6502-PICOVDP / BIOS 2.x version (`Cart-VDP.crt`) |
+| `make FLASH=512K` | Build a banked Flash Cart image (`Cart-512K.crt`) — see [Building for the Flash Cart](#building-for-the-flash-cart) |
 | `make view` | Display hexdump of the built ROM |
 | `make run` | Launch the emulator app with the built cartridge loaded (`make VDP=1 run` selects the PICOVDP card; add `ROM=path/to/BIOS.bin` to boot a local BIOS image) |
 | `make eeprom` | Write the ROM to an AT28C256 EEPROM via TL866 programmer |
@@ -146,7 +240,7 @@ Produces:
 - `Cart.crt` — 32 KB ROM image (`$8000–$FFFF`), ready to burn to a 28C256 or 27C256 PROM
 - `Cart.lst` — Assembly listing file for debugging
 
-`make VDP=1` writes `Cart-VDP.crt` and `Cart-VDP.lst` beside them, and `make VDP=1 eeprom` burns `Cart-VDP.crt`.
+`make VDP=1` writes `Cart-VDP.crt` and `Cart-VDP.lst` beside them, and `make VDP=1 eeprom` burns `Cart-VDP.crt`. Adding `FLASH=` to either produces a banked image instead — `Cart-512K.crt`, `Cart-VDP-1M.crt` — which is burnt with `make flash`, not `make eeprom`.
 
 ### Programming the EEPROM
 
